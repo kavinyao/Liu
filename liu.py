@@ -1,6 +1,111 @@
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
+from enum import Enum
 from functools import reduce
+
+# basic operations
+# TODO: __str__ (consider adding parenthesis)
+class Expression:
+    __metaclass__ = ABCMeta
+
+    def get_variables(self):
+        return set()
+
+class Const(Expression):
+    def __init__(self, value):
+        self.value = str(value)
+
+class Var(Expression):
+    def __init__(self, name):
+        self.name = name
+
+    def get_variables(self):
+        return set(self.name)
+
+class UnaryOp(Expression):
+    __metaclass__ = ABCMeta
+
+    def __init__(self, rhs):
+        self.rhs = rhs
+
+    def get_variables(self):
+        return self.rhs.get_variables()
+
+class Plus(UnaryOp):
+    pass
+
+class Minus(UnaryOp):
+    pass
+
+class BinaryOp(Expression):
+    __metaclass__ = ABCMeta
+
+    def __init__(self, lhs, rhs):
+        self.lhs = lhs
+        serf.rhs = rhs
+
+    def get_variables(self):
+        return self.lhs.get_variables() | self.rhs.get_variables()
+
+class Add(BinaryOp):
+    pass
+
+class Subtract(BinaryOp):
+    pass
+
+class Multiply(BinaryOp):
+    pass
+
+class Divide(BinaryOp):
+    pass
+
+class CmpOperator(Enum):
+    LT = '<'
+    LTE = '<='
+    EQ = '=='
+    NEQ = '!='
+    GT = '>'
+    GTE = '>='
+
+class Compare(BinaryOp):
+    def __init__(self, cmp_op, lhs, rhs):
+        super().__init__(lhs, rhs)
+        self.cmp_op = cmp_op
+
+
+class Operation:
+    __metaclass__ = ABCMeta
+
+    def defined_variables(self):
+        return set()
+
+    def used_variables(self):
+        return set()
+
+class Noop(Operation): pass
+
+class Assign(Operation):
+    def __init__(self, var, expr):
+        assert isinstance(var, Var)
+        assert isinstance(expr, Expression)
+
+        self.var = var
+        self.expr = expr
+
+    def defined_variables(self):
+        return self.var.get_variables()
+
+    def used_variables(self):
+        return self.expr.get_variables()
+
+class If(Operation):
+    def __init__(self, condition):
+        assert isinstance(condition, Compare)
+        self.cond = condition
+
+    def used_variables(self):
+        return self.cond.get_variables()
+
 
 class ControlFlowGraph:
     """It is the user's duty to ensure all nodes must be reachable from entry."""
