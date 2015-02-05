@@ -300,8 +300,7 @@ class ControlFlowGraph:
         self.visited.add(block)
 
 
-class FlowAnalysis:
-    __metaclass__ = ABCMeta
+class FlowAnalysis(metaclass=ABCMeta):
     analyses = set()
 
     def __init__(self):
