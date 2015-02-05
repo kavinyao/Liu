@@ -6,7 +6,6 @@ from functools import reduce
 # basic operations
 # TODO: __str__ (consider adding parenthesis)
 class Expression:
-    __metaclass__ = ABCMeta
 
     def get_variables(self):
         return set()
@@ -23,7 +22,6 @@ class Var(Expression):
         return set([self.name])
 
 class UnaryOp(Expression):
-    __metaclass__ = ABCMeta
 
     def __init__(self, rhs):
         self.rhs = rhs
@@ -38,7 +36,6 @@ class Minus(UnaryOp):
     pass
 
 class BinaryOp(Expression):
-    __metaclass__ = ABCMeta
 
     def __init__(self, lhs, rhs):
         self.lhs = lhs
@@ -74,7 +71,6 @@ class Compare(BinaryOp):
 
 
 class Operation:
-    __metaclass__ = ABCMeta
 
     def defined_variables(self):
         return set()
