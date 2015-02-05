@@ -3,8 +3,13 @@ from collections import defaultdict
 from enum import Enum
 from functools import reduce
 
+def strip_parens(expr):
+    """Strip surrounding parenthesis."""
+    if expr[0] == '(' and expr[-1] == ')':
+        return expr[1:-1]
+    return expr
+
 # basic operations
-# TODO: __str__ (consider adding parenthesis)
 class Expression:
 
     def get_variables(self):
@@ -14,6 +19,9 @@ class Const(Expression):
     def __init__(self, value):
         self.value = str(value)
 
+    def __str__(self):
+        return self.value
+
 class Var(Expression):
     def __init__(self, name):
         self.name = name
@@ -21,7 +29,26 @@ class Var(Expression):
     def get_variables(self):
         return set([self.name])
 
-class UnaryOp(Expression):
+    def __str__(self):
+        return self.name
+
+class FunctionCall(Expression):
+
+    def __init__(self, func_name, *args):
+        for arg in args:
+            assert isinstance(arg, Expression)
+
+        self.func_name = func_name
+        self.args = args
+
+    def __str__(self):
+        # strip parenthesis
+        params = (strip_parens(arg) for arg in self.args)
+        return '{}({})'.format(self.func_name, params)
+
+class Arithmetic(Expression): pass
+
+class UnaryOp(Arithmetic):
 
     def __init__(self, rhs):
         self.rhs = rhs
@@ -30,12 +57,14 @@ class UnaryOp(Expression):
         return self.rhs.get_variables()
 
 class Plus(UnaryOp):
-    pass
+    def __str__(self):
+        return "(+{})".format(self.rhs)
 
 class Minus(UnaryOp):
-    pass
+    def __str__(self):
+        return "(-{})".format(self.rhs)
 
-class BinaryOp(Expression):
+class BinaryOp(Arithmetic):
 
     def __init__(self, lhs, rhs):
         self.lhs = lhs
@@ -45,16 +74,20 @@ class BinaryOp(Expression):
         return self.lhs.get_variables() | self.rhs.get_variables()
 
 class Add(BinaryOp):
-    pass
+    def __str__(self):
+        return "({} + {})".format(self.lhs, self.rhs)
 
 class Subtract(BinaryOp):
-    pass
+    def __str__(self):
+        return "({} - {})".format(self.lhs, self.rhs)
 
 class Multiply(BinaryOp):
-    pass
+    def __str__(self):
+        return "({} * {})".format(self.lhs, self.rhs)
 
 class Divide(BinaryOp):
-    pass
+    def __str__(self):
+        return "({} / {})".format(self.lhs, self.rhs)
 
 class CmpOperator(Enum):
     LT = '<'
@@ -69,6 +102,9 @@ class Compare(BinaryOp):
         super().__init__(lhs, rhs)
         self.cmp_op = cmp_op
 
+    def __str__(self):
+        return "({} {} {})".format(self.lhs, self.cmp_op.value, self.rhs)
+
 
 class Operation:
 
@@ -78,7 +114,9 @@ class Operation:
     def used_variables(self):
         return set()
 
-class Noop(Operation): pass
+class Noop(Operation):
+    def __str__(self):
+        return "Noop"
 
 NOOP = Noop()
 
@@ -96,6 +134,9 @@ class Assign(Operation):
     def used_variables(self):
         return self.expr.get_variables()
 
+    def __str__(self):
+        return "{} = {}".format(self.var, self.expr)
+
 class If(Operation):
     def __init__(self, condition):
         assert isinstance(condition, Compare)
@@ -103,6 +144,9 @@ class If(Operation):
 
     def used_variables(self):
         return self.cond.get_variables()
+
+    def __str__(self):
+        return "IF {}".format(self.cond)
 
 
 class ControlFlowGraph:
