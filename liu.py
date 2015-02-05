@@ -42,7 +42,7 @@ class BinaryOp(Expression):
 
     def __init__(self, lhs, rhs):
         self.lhs = lhs
-        serf.rhs = rhs
+        self.rhs = rhs
 
     def get_variables(self):
         return self.lhs.get_variables() | self.rhs.get_variables()
@@ -84,6 +84,8 @@ class Operation:
 
 class Noop(Operation): pass
 
+NOOP = Noop()
+
 class Assign(Operation):
     def __init__(self, var, expr):
         assert isinstance(var, Var)
@@ -112,7 +114,7 @@ class ControlFlowGraph:
 
     class QuadBlock:
         """A simple block with only 1 statement."""
-        def __init__(self, cfg, no, operation=Noop):
+        def __init__(self, cfg, no, operation):
             self.cfg = cfg
             self.no = no
             self.op = operation
@@ -146,6 +148,12 @@ class ControlFlowGraph:
         def __hash__(self):
             return hash(self.no)
 
+        def __str__(self):
+            return 'B{}'.format(self.no)
+
+        def __repr__(self):
+            return str(self)
+
 
     # for now, let's use QuadBlock as BasicBlock
     BasicBlock = QuadBlock
@@ -160,14 +168,14 @@ class ControlFlowGraph:
         self.entry = self.new_block()
         self.exit = self.new_block()
 
-    def entry(self):
+    def get_entry(self):
         return self.entry
 
-    def exit(self):
+    def get_exit(self):
         return self.exit
 
-    def new_block(self, operation=Noop):
-        block = BasicBlock(self, self.counter, operation)
+    def new_block(self, operation=NOOP):
+        block = ControlFlowGraph.BasicBlock(self, self.counter, operation)
 
         # bookkeeping
         self.pred[block] = set()
@@ -194,6 +202,11 @@ class ControlFlowGraph:
 
     def iterate(self, post_order=True):
         """Iterate over blocks in post order or reverse post order."""
+        # TODO: create iterator instances to enable multiple traversal
+        #       at the same time
+        self.visiting = set()
+        self.visited = set()
+
         if post_order:
             return self.__post_order(self.entry)
         else:
@@ -201,12 +214,17 @@ class ControlFlowGraph:
             return reversed(list(self.__post_order(self.entry)))
 
     def __post_order(self, block):
+        self.visiting.add(block)
+
         for succ in self.succ[block]:
-            if succ is visited:
+            if succ in self.visiting or succ in self.visited:
                 continue
-            self.__post_order(succ)
+            yield from self.__post_order(succ)
 
         yield block
+
+        self.visiting.remove(block)
+        self.visited.add(block)
 
 
 class FlowAnalysis:
@@ -265,9 +283,9 @@ class Solver:
     @staticmethod
     def run_analysis(analysis, cfg):
         if analysis.is_forward():
-            return __run_forward(analysis, cfg)
+            return Solver.__run_forward(analysis, cfg)
         else:
-            return __run_backward(analysis, cfg)
+            return Solver.__run_backward(analysis, cfg)
 
     @staticmethod
     def __run_forward(analysis, cfg):
@@ -278,6 +296,7 @@ class Solver:
         # initialize OUT of each block
         for block in cfg.blocks():
             if block.is_entry():
+                block.IN[A] = None
                 block.OUT[A] = analysis.boundary_value()
             else:
                 block.OUT[A] = analysis.initial_value()
@@ -290,9 +309,9 @@ class Solver:
             for block in cfg.iterate(post_order=False):
                 if block.is_entry(): continue
 
-                block.IN[A] = reduce(analysis.meet, p.OUT[A] for p in block.predecessors())
-                old_OUT = B.OUT[A]
-                block.OUT = analysis.transfer(block, block.IN[A])
+                block.IN[A] = reduce(analysis.meet, (p.OUT[A] for p in block.predecessors()))
+                old_OUT = block.OUT[A]
+                block.OUT[A] = analysis.transfer(block, block.IN[A])
 
                 if old_OUT != block.OUT[A]:
                     changed = True
@@ -324,9 +343,9 @@ class ReachingDefinition(FlowAnalysis):
 
     def transfer(self, block, val):
         """Apply transfer function on block. Must NOT alter val."""
-        result = val
+        result = set(val)
 
-        defined_vars = block.defined_vars()
+        defined_vars = block.defined_variables()
         # process only if this block defines some variable
         if len(defined_vars) > 0:
             for var in defined_vars:
@@ -343,7 +362,7 @@ class ReachingDefinition(FlowAnalysis):
             for var in block.defined_variables():
                 defs[var].add(block)
 
-        self.defs = defs
+        self.defs = dict(defs)
 
     def postprocess(self, cfg):
         """Do postprocessing (optional)."""
@@ -359,8 +378,8 @@ if __name__ == '__main__':
     n5 = cfg.new_block(Assign(Var('i'), Add(Var('i'), Const('1'))))
     n6 = cfg.new_block(Assign(Var('j'), Subtract(Var('j'), Const('1'))))
     n7 = cfg.new_block(Assign(Var('a'), Var('u2')))
-    n8 = cfg.new_block(Assign(Var('u'), Var('u3')))
-    cfg.add_edge(cfg.entry(), n2)
+    n8 = cfg.new_block(Assign(Var('i'), Var('u3')))
+    cfg.add_edge(cfg.get_entry(), n2)
     cfg.add_edge(n2, n3)
     cfg.add_edge(n3, n4)
     cfg.add_edge(n4, n5)
@@ -369,13 +388,13 @@ if __name__ == '__main__':
     cfg.add_edge(n6, n8)
     cfg.add_edge(n7, n8)
     cfg.add_edge(n8, n5)
-    cfg.add_edge(n8, cfg.exit())
+    cfg.add_edge(n8, cfg.get_exit())
 
     # solve reaching definitions
     reach_def = ReachingDefinition()
-    Solver.solve(reach_def, cfg)
+    Solver.run_analysis(reach_def, cfg)
 
     RD = reach_def.name()
     for block in cfg.iterate(post_order=False):
-        print('B{}.in = {}'.format(block.no, block.IN[RD]))
-        print('B{}.out = {}'.format(block.no, block.OUT[RD]))
+        print('B{}.IN  = {}'.format(block.no, block.IN[RD]))
+        print('B{}.OUT = {}'.format(block.no, block.OUT[RD]))
