@@ -20,7 +20,7 @@ class Var(Expression):
         self.name = name
 
     def get_variables(self):
-        return set(self.name)
+        return set([self.name])
 
 class UnaryOp(Expression):
     __metaclass__ = ABCMeta
@@ -314,6 +314,37 @@ class Solver:
                 block.OUT[A] = analysis.transfer(block, block.IN[A])
 
                 if old_OUT != block.OUT[A]:
+                    changed = True
+
+        analysis.postprocess(cfg)
+
+    @staticmethod
+    def __run_backward(analysis, cfg):
+        A = analysis.name()
+
+        analysis.preprocess(cfg)
+
+        # initialize IN of each block
+        for block in cfg.blocks():
+            if block.is_exit():
+                block.IN[A] = analysis.boundary_value()
+                block.OUT[A] = None
+            else:
+                block.IN[A] = analysis.initial_value()
+
+        # iterate until convergence
+        changed = True
+        while changed:
+            changed = False
+            # traverse cfg in reverse post order
+            for block in cfg.iterate(post_order=True):
+                if block.is_exit(): continue
+
+                block.OUT[A] = reduce(analysis.meet, (s.IN[A] for s in block.successors()))
+                old_IN = block.IN[A]
+                block.IN[A] = analysis.transfer(block, block.OUT[A])
+
+                if old_IN != block.IN[A]:
                     changed = True
 
         analysis.postprocess(cfg)
