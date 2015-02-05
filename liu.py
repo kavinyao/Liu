@@ -164,6 +164,9 @@ class ControlFlowGraph:
             self.IN = {}
             self.OUT = {}
 
+        def set_operation(self, operation):
+            self.op = operation
+
         def is_entry(self):
             return self == self.cfg.entry
 
@@ -204,9 +207,16 @@ class ControlFlowGraph:
         self.counter = 0
         self.pred = {}
         self.succ = {}
+        self.meta = {}
 
         self.entry = self.new_block()
         self.exit = self.new_block()
+
+    def set_meta(self, key, val):
+        self.meta[key] = val
+
+    def get_meta(self, key, defval=None):
+        return self.meta.get(key, defval)
 
     def get_entry(self):
         return self.entry
@@ -221,6 +231,23 @@ class ControlFlowGraph:
         self.pred[block] = set()
         self.succ[block] = set()
         self.counter += 1
+
+        return block
+
+    def insert_empty_block(self, src, dst):
+        """Insert an empty block along edge src -> dst."""
+        assert dst in self.succ[src]
+        self.succ[src].remove(dst)
+        self.pred[dst].remove(src)
+
+        # use consistent naming
+        block_no = '{}-{}'.format(src.no, dst.no)
+        block = ControlFlowGraph.BasicBlock(self, block_no, NOOP)
+        self.pred[block] = set()
+        self.succ[block] = set()
+
+        self.add_edge(src, block)
+        self.add_edge(block, dst)
 
         return block
 
@@ -239,6 +266,12 @@ class ControlFlowGraph:
     def blocks(self):
         """Return an iterator of all blocks."""
         return self.pred.keys()
+
+    def edges(self):
+        """Return an iterator of all edges in the form of (src, dst) tuples."""
+        for src, dsts in self.succ.items():
+            for dst in dsts:
+                yield (src, dst)
 
     def iterate(self, post_order=True):
         """Iterate over blocks in post order or reverse post order."""
@@ -467,3 +500,274 @@ class Liveness(FlowAnalysis):
         result.update(block.used_variables())
 
         return result
+
+
+ALL_EXPRS = 'All-Expression-Set'
+
+ANALYSIS_ANTICIPATED_EXPR = 'Anticipated-Expressions'
+class AnticipatedExpressions(FlowAnalysis):
+
+    def name(self):
+        return ANALYSIS_ANTICIPATED_EXPR
+
+    def is_forward(self):
+        return False
+
+    def boundary_value(self):
+        return set()
+
+    def initial_value(self):
+        # see preprocess()
+        return self.cfg.get_meta(ALL_EXPRS)
+
+    def meet(self, val1, val2):
+        """Meet is intersection of two sets."""
+        return val1 & val2
+
+    def transfer(self, block, val):
+        """Apply transfer function on block. Must NOT alter val."""
+        result = set(val)
+
+        # f(x) = use U (x - kill)
+        result.difference_update(block.PRE_KILL)
+        result.update(block.PRE_USE)
+
+        return result
+
+    def preprocess(self, cfg):
+        # save for use later
+        self.cfg = cfg
+
+        # find edges whose target has more than one predecessors
+        # NOTE: don't insert on the fly to avoid edit-on-iteration
+        critical_edges = []
+        for src, dst in cfg.edges():
+            if len(dst.predecessors()) > 1:
+                critical_edges.append((src, dst))
+
+        # insert empty block on such edges
+        for src, dst in critical_edges:
+            cfg.insert_empty_block(src, dst)
+
+        # collect all partial expressions along with the associated variables
+        # also set USE for each block by the way
+        # TODO: don't inject properties (PRE_USE, PRE_KILL, etc) to blocks
+        partial_exprs = set()
+        var_expr_map = defaultdict(set)
+        for block in cfg.blocks():
+            # consider only arithmetic expression on RHS of assignment
+            if not isinstance(block.op, Assign):
+                block.PRE_USE = set()
+                continue
+
+            assignment = block.op
+            expr = assignment.expr
+
+            if not isinstance(expr, Arithmetic):
+                block.PRE_USE = set()
+                continue
+
+            expr_str = str(expr)
+            partial_exprs.add(expr_str)
+            for used_var in expr.get_variables():
+                var_expr_map[used_var].add(expr_str)
+
+            block.PRE_USE = set([expr_str])
+
+        # set universal set of partial expressions
+        cfg.set_meta(ALL_EXPRS, partial_exprs)
+
+        # set KILL for each block
+        for block in cfg.blocks():
+            if not isinstance(block.op, Assign):
+                block.PRE_KILL = set()
+                continue
+
+            kill_set = set()
+            assignment = block.op
+            for var in assignment.var.get_variables():
+                kill_set.update(var_expr_map[var])
+
+            block.PRE_KILL = kill_set
+
+    def postprocess(self, cfg):
+        print('\nAfter Anticipated Expressions:')
+        name = self.name()
+        for block in cfg.iterate(post_order=False):
+            print('B{}.IN  = {}'.format(block.no, block.IN[name]))
+            print('B{}.OUT = {}'.format(block.no, block.OUT[name]))
+
+
+ANALYSIS_AVAILABLE_EXPR = 'Available-Expressions'
+class AvailableExpressions(FlowAnalysis):
+
+    def name(self):
+        return ANALYSIS_AVAILABLE_EXPR
+
+    def is_forward(self):
+        return True
+
+    def boundary_value(self):
+        return set()
+
+    def initial_value(self):
+        return self.cfg.get_meta(ALL_EXPRS)
+
+    def meet(self, val1, val2):
+        """Meet is intersection of two sets."""
+        return val1 & val2
+
+    def transfer(self, block, val):
+        """Apply transfer function on block. Must NOT alter val."""
+        result = set(val)
+
+        # f(x) = (anticipated[B].in U x) - kill
+        result.update(block.IN[ANALYSIS_ANTICIPATED_EXPR])
+        result.difference_update(block.PRE_KILL)
+
+        return result
+
+    def preprocess(self, cfg):
+        self.cfg = cfg
+
+    def postprocess(self, cfg):
+        print('\nAfter Available Expressions:')
+        name = self.name()
+        for block in cfg.iterate(post_order=False):
+            print('B{}.IN  = {}'.format(block.no, block.IN[name]))
+            print('B{}.OUT = {}'.format(block.no, block.OUT[name]))
+
+        # compute earliest
+        for block in cfg.iterate(post_order=False):
+            # skip entry because available[ENTRY].in is not defined
+            if not block.is_entry():
+                anticipated_in = block.IN[ANALYSIS_ANTICIPATED_EXPR]
+                available_in = block.IN[ANALYSIS_AVAILABLE_EXPR]
+                block.PRE_EARLIEST = anticipated_in - available_in
+                print('B{}.EARLIEST = {}'.format(block.no, block.PRE_EARLIEST))
+
+
+ANALYSIS_POSTPONABLE_EXPR = 'Postponable-Expressions'
+class PostponableExpressions(FlowAnalysis):
+
+    def name(self):
+        return ANALYSIS_POSTPONABLE_EXPR
+
+    def is_forward(self):
+        return True
+
+    def boundary_value(self):
+        return set()
+
+    def initial_value(self):
+        return self.cfg.get_meta(ALL_EXPRS)
+
+    def meet(self, val1, val2):
+        """Meet is intersection of two sets."""
+        return val1 & val2
+
+    def transfer(self, block, val):
+        """Apply transfer function on block. Must NOT alter val."""
+        result = set(val)
+
+        # f(x) = (earliest[B] U x) - use
+        result.update(block.PRE_EARLIEST)
+        result.difference_update(block.PRE_USE)
+
+        return result
+
+    def preprocess(self, cfg):
+        self.cfg = cfg
+
+    def postprocess(self, cfg):
+        print('\nAfter Postponable Expressions:')
+        name = self.name()
+        for block in cfg.iterate(post_order=False):
+            print('B{}.IN  = {}'.format(block.no, block.IN[name]))
+            print('B{}.OUT = {}'.format(block.no, block.OUT[name]))
+
+        # compute latest
+        def helper(block):
+            """Compute rearliest or postponable."""
+            earliest = block.PRE_EARLIEST
+            postponable_in = block.IN[ANALYSIS_POSTPONABLE_EXPR]
+            return earliest | postponable_in
+
+        U = self.cfg.get_meta(ALL_EXPRS)
+        def complement(S):
+            """Compute U-S."""
+            return U - S
+
+        for block in cfg.iterate(post_order=False):
+            # handle ENTRY with care since earliest is not defined
+            # (it actually doesn't matter what the entry.latest is)
+            if block.is_entry():
+                block.PRE_LATEST = set()
+                continue
+
+            succ_vals = [helper(succ) for succ in block.successors()]
+            temp = set()
+            if len(succ_vals) > 0:
+                temp = complement(reduce(self.meet, succ_vals))
+            block.PRE_LATEST = helper(block) & (block.PRE_USE | temp)
+            print('B{}.LATEST = {}'.format(block.no, block.PRE_LATEST))
+
+
+ANALYSIS_USED_EXPR = 'Used-Expressions'
+class UsedExpressions(FlowAnalysis):
+
+    def name(self):
+        return ANALYSIS_USED_EXPR
+
+    def is_forward(self):
+        return False
+
+    def boundary_value(self):
+        return set()
+
+    def initial_value(self):
+        return set()
+
+    def meet(self, val1, val2):
+        """Meet is union of two sets."""
+        return val1 | val2
+
+    def transfer(self, block, val):
+        """Apply transfer function on block. Must NOT alter val."""
+        result = set(val)
+
+        # f(x) = (use U x) - latest[B]
+        result.update(block.PRE_USE)
+        result.difference_update(block.PRE_LATEST)
+
+        return result
+
+    def postprocess(self, cfg):
+        print('\nAfter Used Expressions:')
+        name = self.name()
+        for block in cfg.iterate(post_order=False):
+            print('B{}.IN  = {}'.format(block.no, block.IN[name]))
+            print('B{}.OUT = {}'.format(block.no, block.OUT[name]))
+
+
+def eliminate_partial_redundancy(cfg, *, debug=False):
+    # step 0: preprocess: add necessary empty blocks and determine use and kill
+    # step 1: run anticipated expressions analysis
+    ant = AnticipatedExpressions()
+    Solver.run_analysis(ant, cfg)
+
+    # step 2: run available expressions analysis and compute earliest
+    avail = AvailableExpressions()
+    Solver.run_analysis(avail, cfg)
+
+    # step 3: run postponable expressions analysis and compute latest
+    post = PostponableExpressions()
+    Solver.run_analysis(post, cfg)
+
+    # step 4: run used expressions analysis
+    used = UsedExpressions()
+    Solver.run_analysis(used, cfg)
+
+    # step 5: postprocess: replace redundant partial expressions with
+    #         newly created temporary variables
+    # TODO
