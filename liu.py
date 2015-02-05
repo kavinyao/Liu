@@ -266,6 +266,7 @@ class FlowAnalysis:
     @abstractmethod
     def transfer(self, block, val):
         """Apply transfer function on block. Must NOT alter val."""
+        # TODO: enforce copy in solver
         pass
 
     def preprocess(self, cfg):
@@ -395,6 +396,34 @@ class ReachingDefinition(FlowAnalysis):
 
         self.defs = dict(defs)
 
-    def postprocess(self, cfg):
-        """Do postprocessing (optional)."""
-        pass
+
+class Liveness(FlowAnalysis):
+
+    def __init__(self):
+        super().__init__()
+
+    def name(self):
+        return 'Liveness'
+
+    def is_forward(self):
+        return False
+
+    def boundary_value(self):
+        return set()
+
+    def initial_value(self):
+        return set()
+
+    def meet(self, val1, val2):
+        """Meet is union of two sets."""
+        return val1 | val2
+
+    def transfer(self, block, val):
+        """Apply transfer function on block. Must NOT alter val."""
+        result = set(val)
+
+        # f(x) = uses U (x - defs)
+        result.difference_update(block.defined_variables())
+        result.update(block.used_variables())
+
+        return result
