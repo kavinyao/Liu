@@ -15,6 +15,17 @@ class Expression:
     def get_variables(self):
         return set()
 
+    def __hash__(self):
+        return hash(str(self))
+
+    def __repr__(self):
+        return str(self)
+
+    def __eq__(self, other):
+        return str(self) == str(other)
+
+    # TODO: copy
+
 class Const(Expression):
     def __init__(self, value):
         self.value = str(value)
@@ -113,6 +124,9 @@ class Operation:
 
     def used_variables(self):
         return set()
+
+    def __repr__(self):
+        return str(self)
 
 class Noop(Operation):
     def __str__(self):
@@ -566,12 +580,11 @@ class AnticipatedExpressions(FlowAnalysis):
                 block.PRE_USE = set()
                 continue
 
-            expr_str = str(expr)
-            partial_exprs.add(expr_str)
+            partial_exprs.add(expr)
             for used_var in expr.get_variables():
-                var_expr_map[used_var].add(expr_str)
+                var_expr_map[used_var].add(expr)
 
-            block.PRE_USE = set([expr_str])
+            block.PRE_USE = set([expr])
 
         # set universal set of partial expressions
         cfg.set_meta(ALL_EXPRS, partial_exprs)
