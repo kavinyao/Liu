@@ -770,3 +770,19 @@ def eliminate_partial_redundancy(cfg, *, debug=False):
     # step 5: postprocess: replace redundant partial expressions with
     #         newly created temporary variables
     # TODO
+    for block in cfg.iterate(post_order=False):
+        if block.is_exit(): continue
+
+        exprs_to_prepend = block.PRE_LATEST & block.OUT[ANALYSIS_USED_EXPR]
+        if exprs_to_prepend:
+            for expr in exprs_to_prepend:
+                print('Prepend `{}` to B{}'.format(expr, block.no))
+
+    U = cfg.get_meta(ALL_EXPRS)
+    for block in cfg.iterate(post_order=False):
+        if block.is_exit(): continue
+
+        exprs_to_replace = block.PRE_USE & ((U - block.PRE_LATEST) | block.OUT[ANALYSIS_USED_EXPR])
+        if exprs_to_replace:
+            for expr in exprs_to_replace:
+                print('Replace `{}` in B{}'.format(expr, block.no))
