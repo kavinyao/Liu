@@ -237,13 +237,16 @@ class ControlFlowGraph:
     def get_exit(self):
         return self.exit
 
-    def new_block(self, operation=NOOP):
-        block = ControlFlowGraph.BasicBlock(self, self.counter, operation)
+    def new_block(self, operation=NOOP, *, name=None):
+        if name is None:
+            name = self.counter
+            self.counter += 1
+
+        block = ControlFlowGraph.BasicBlock(self, name, operation)
 
         # bookkeeping
         self.pred[block] = set()
         self.succ[block] = set()
-        self.counter += 1
 
         return block
 
@@ -255,9 +258,7 @@ class ControlFlowGraph:
 
         # use consistent naming
         block_no = '{}-{}'.format(src.no, dst.no)
-        block = ControlFlowGraph.BasicBlock(self, block_no, NOOP)
-        self.pred[block] = set()
-        self.succ[block] = set()
+        block = self.new_block(name=block_no)
 
         self.add_edge(src, block)
         self.add_edge(block, dst)
@@ -273,18 +274,12 @@ class ControlFlowGraph:
         # create empty block
         # use consistent naming
         block_no = "{}'".format(block.no)
-        # TODO: refactor self.new_block() to reduce code
-        new_block = ControlFlowGraph.BasicBlock(self, block_no, NOOP)
-        self.pred[new_block] = set()
-        self.succ[new_block] = set()
+        new_block = self.new_block(name=block_no)
 
         # create a list to avoid edit-on-iteration of the set
         for pred in list(block.predecessors()):
             # remove existing edge
-            # TODO: refactor to self.remove_edge(src, dst)
-            self.succ[pred].remove(block)
-            self.pred[block].remove(pred)
-
+            self.remove_edge(pred, block)
             # insert new edge
             self.add_edge(pred, new_block)
 
