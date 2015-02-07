@@ -367,14 +367,19 @@ class FlowAnalysis(metaclass=ABCMeta):
         pass
 
     @abstractmethod
+    def copy_value(self, val):
+        """Return a copy of val."""
+        pass
+
+    @abstractmethod
     def meet(self, val1, val2):
         """Compute meet of two data flow objects."""
         pass
 
     @abstractmethod
     def transfer(self, block, val):
-        """Apply transfer function on block. Must NOT alter val."""
-        # TODO: enforce copy in solver
+        """Apply transfer function on block.
+        NOTE: val is always a copy so can be safely mutated."""
         pass
 
     def preprocess(self, cfg):
@@ -420,7 +425,7 @@ class Solver:
 
                 block.IN[A] = reduce(analysis.meet, (p.OUT[A] for p in block.predecessors()))
                 old_OUT = block.OUT[A]
-                block.OUT[A] = analysis.transfer(block, block.IN[A])
+                block.OUT[A] = analysis.transfer(block, analysis.copy_value(block.IN[A]))
 
                 if old_OUT != block.OUT[A]:
                     changed = True
@@ -451,7 +456,7 @@ class Solver:
 
                 block.OUT[A] = reduce(analysis.meet, (s.IN[A] for s in block.successors()))
                 old_IN = block.IN[A]
-                block.IN[A] = analysis.transfer(block, block.OUT[A])
+                block.IN[A] = analysis.transfer(block, analysis.copy_value(block.OUT[A]))
 
                 if old_IN != block.IN[A]:
                     changed = True
@@ -477,13 +482,15 @@ class ReachingDefinition(FlowAnalysis):
     def initial_value(self):
         return set()
 
+    def copy_value(self, val):
+        return set(val)
+
     def meet(self, val1, val2):
         """Meet is union of two sets."""
         return val1 | val2
 
     def transfer(self, block, val):
-        """Apply transfer function on block. Must NOT alter val."""
-        result = set(val)
+        result = val
 
         defined_vars = block.defined_variables()
         # process only if this block defines some variable
@@ -522,13 +529,15 @@ class Liveness(FlowAnalysis):
     def initial_value(self):
         return set()
 
+    def copy_value(self, val):
+        return set(val)
+
     def meet(self, val1, val2):
         """Meet is union of two sets."""
         return val1 | val2
 
     def transfer(self, block, val):
-        """Apply transfer function on block. Must NOT alter val."""
-        result = set(val)
+        result = val
 
         # f(x) = uses U (x - defs)
         result.difference_update(block.defined_variables())
@@ -555,13 +564,15 @@ class AnticipatedExpressions(FlowAnalysis):
         # see preprocess()
         return self.cfg.get_meta(ALL_EXPRS)
 
+    def copy_value(self, val):
+        return set(val)
+
     def meet(self, val1, val2):
         """Meet is intersection of two sets."""
         return val1 & val2
 
     def transfer(self, block, val):
-        """Apply transfer function on block. Must NOT alter val."""
-        result = set(val)
+        result = val
 
         # f(x) = use U (x - kill)
         result.difference_update(block.PRE_KILL)
@@ -647,13 +658,15 @@ class AvailableExpressions(FlowAnalysis):
     def initial_value(self):
         return self.cfg.get_meta(ALL_EXPRS)
 
+    def copy_value(self, val):
+        return set(val)
+
     def meet(self, val1, val2):
         """Meet is intersection of two sets."""
         return val1 & val2
 
     def transfer(self, block, val):
-        """Apply transfer function on block. Must NOT alter val."""
-        result = set(val)
+        result = val
 
         # f(x) = (anticipated[B].in U x) - kill
         result.update(block.IN[ANALYSIS_ANTICIPATED_EXPR])
@@ -696,13 +709,15 @@ class PostponableExpressions(FlowAnalysis):
     def initial_value(self):
         return self.cfg.get_meta(ALL_EXPRS)
 
+    def copy_value(self, val):
+        return set(val)
+
     def meet(self, val1, val2):
         """Meet is intersection of two sets."""
         return val1 & val2
 
     def transfer(self, block, val):
-        """Apply transfer function on block. Must NOT alter val."""
-        result = set(val)
+        result = val
 
         # f(x) = (earliest[B] U x) - use
         result.update(block.PRE_EARLIEST)
@@ -762,13 +777,15 @@ class UsedExpressions(FlowAnalysis):
     def initial_value(self):
         return set()
 
+    def copy_value(self, val):
+        return set(val)
+
     def meet(self, val1, val2):
         """Meet is union of two sets."""
         return val1 | val2
 
     def transfer(self, block, val):
-        """Apply transfer function on block. Must NOT alter val."""
-        result = set(val)
+        result = val
 
         # f(x) = (use U x) - latest[B]
         result.update(block.PRE_USE)
