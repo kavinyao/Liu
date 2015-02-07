@@ -1,5 +1,6 @@
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
+from copy import deepcopy
 from enum import Enum
 from functools import reduce
 
@@ -23,8 +24,6 @@ class Expression:
 
     def __eq__(self, other):
         return str(self) == str(other)
-
-    # TODO: copy
 
 class Const(Expression):
     def __init__(self, value):
@@ -54,7 +53,7 @@ class FunctionCall(Expression):
 
     def __str__(self):
         # strip parenthesis
-        params = (strip_parens(arg) for arg in self.args)
+        params = ', '.join(strip_parens(arg) for arg in self.args)
         return '{}({})'.format(self.func_name, params)
 
 class Arithmetic(Expression): pass
@@ -264,6 +263,34 @@ class ControlFlowGraph:
         self.add_edge(block, dst)
 
         return block
+
+    def prepend_empty_block(self, block):
+        """Prepend an empty block to the specified block.
+        The edges from predecessors will point to the new empty block.
+        """
+        assert not block.is_entry()
+
+        # create empty block
+        # use consistent naming
+        block_no = "{}'".format(block.no)
+        # TODO: refactor self.new_block() to reduce code
+        new_block = ControlFlowGraph.BasicBlock(self, block_no, NOOP)
+        self.pred[new_block] = set()
+        self.succ[new_block] = set()
+
+        # create a list to avoid edit-on-iteration of the set
+        for pred in list(block.predecessors()):
+            # remove existing edge
+            # TODO: refactor to self.remove_edge(src, dst)
+            self.succ[pred].remove(block)
+            self.pred[block].remove(pred)
+
+            # insert new edge
+            self.add_edge(pred, new_block)
+
+        self.add_edge(new_block, block)
+
+        return new_block
 
     def add_edge(self, src, dst):
         assert dst not in self.succ[src]
@@ -782,21 +809,31 @@ def eliminate_partial_redundancy(cfg, *, debug=False):
 
     # step 5: postprocess: replace redundant partial expressions with
     #         newly created temporary variables
-    # TODO
+    # TODO: create PRE analysis
+
+    print('\nModifications:')
+    # collect temporary variables for redundant expressions
     temp_vars = {}
     temp_var_counter = 1
+    block_prepend = []
     for block in cfg.iterate(post_order=False):
         if block.is_exit(): continue
 
         exprs_to_prepend = block.PRE_LATEST & block.OUT[ANALYSIS_USED_EXPR]
         if exprs_to_prepend:
+            assert len(exprs_to_prepend) == 1 # since we are using QuadBlock
             for expr in exprs_to_prepend:
                 temp_var = temp_vars.get(expr, None)
                 if temp_var is None:
-                    temp_var = 't{:d}'.format(temp_var_counter)
+                    temp_var = Var('t{:d}'.format(temp_var_counter))
                     temp_vars[expr] = temp_var
                     temp_var_counter += 1
                 print('Prepend `{} = {}` to {}'.format(temp_var, expr, block))
+                # change CFG later to avoid edit-on-iteration
+                # if we add potential new blocks here, in the next iteration
+                # we may encounter blocks with no proper IN and OUT
+                # NOTE: use deepcopy to avoid shared object
+                block_prepend.append((block, Assign(temp_var, deepcopy(expr))))
 
     U = cfg.get_meta(ALL_EXPRS)
     for block in cfg.iterate(post_order=False):
@@ -804,6 +841,25 @@ def eliminate_partial_redundancy(cfg, *, debug=False):
 
         exprs_to_replace = block.PRE_USE & ((U - block.PRE_LATEST) | block.OUT[ANALYSIS_USED_EXPR])
         if exprs_to_replace:
+            assert len(exprs_to_replace) == 1
+            assert isinstance(block.op, Assign)
+            assign = block.op
             for expr in exprs_to_replace:
+                assert expr == assign.expr
                 temp_var = temp_vars[expr]
                 print('Replace `{}` in {} with {}'.format(expr, block, temp_var))
+                # NOTE: use deepcopy to avoid shared object
+                block.set_operation(Assign(assign.var, deepcopy(temp_var)))
+
+    # finally we can change the CFG
+    for block, op_to_prepend in block_prepend:
+        if block.op == NOOP:
+            block.set_operation(op_to_prepend)
+        else:
+            frontier = cfg.prepend_empty_block(block)
+            assert frontier.op == NOOP
+            frontier.set_operation(op_to_prepend)
+
+    print('\nFinal results:')
+    for block in cfg.iterate(post_order=False):
+        print("{}: {}".format(block, block.op))
