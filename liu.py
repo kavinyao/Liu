@@ -593,8 +593,8 @@ class AnticipatedExpressions(FlowAnalysis):
         print('\nAfter Anticipated Expressions:')
         name = self.name()
         for block in cfg.iterate(post_order=False):
-            print('B{}.IN  = {}'.format(block.no, block.IN[name]))
-            print('B{}.OUT = {}'.format(block.no, block.OUT[name]))
+            print('{}.IN  = {}'.format(block, block.IN[name]))
+            print('{}.OUT = {}'.format(block, block.OUT[name]))
 
 
 ANALYSIS_AVAILABLE_EXPR = 'Available-Expressions'
@@ -633,8 +633,8 @@ class AvailableExpressions(FlowAnalysis):
         print('\nAfter Available Expressions:')
         name = self.name()
         for block in cfg.iterate(post_order=False):
-            print('B{}.IN  = {}'.format(block.no, block.IN[name]))
-            print('B{}.OUT = {}'.format(block.no, block.OUT[name]))
+            print('{}.IN  = {}'.format(block, block.IN[name]))
+            print('{}.OUT = {}'.format(block, block.OUT[name]))
 
         # compute earliest
         for block in cfg.iterate(post_order=False):
@@ -643,7 +643,7 @@ class AvailableExpressions(FlowAnalysis):
                 anticipated_in = block.IN[ANALYSIS_ANTICIPATED_EXPR]
                 available_in = block.IN[ANALYSIS_AVAILABLE_EXPR]
                 block.PRE_EARLIEST = anticipated_in - available_in
-                print('B{}.EARLIEST = {}'.format(block.no, block.PRE_EARLIEST))
+                print('{}.EARLIEST = {}'.format(block, block.PRE_EARLIEST))
 
 
 ANALYSIS_POSTPONABLE_EXPR = 'Postponable-Expressions'
@@ -682,8 +682,8 @@ class PostponableExpressions(FlowAnalysis):
         print('\nAfter Postponable Expressions:')
         name = self.name()
         for block in cfg.iterate(post_order=False):
-            print('B{}.IN  = {}'.format(block.no, block.IN[name]))
-            print('B{}.OUT = {}'.format(block.no, block.OUT[name]))
+            print('{}.IN  = {}'.format(block, block.IN[name]))
+            print('{}.OUT = {}'.format(block, block.OUT[name]))
 
         # compute latest
         def helper(block):
@@ -709,7 +709,7 @@ class PostponableExpressions(FlowAnalysis):
             if len(succ_vals) > 0:
                 temp = complement(reduce(self.meet, succ_vals))
             block.PRE_LATEST = helper(block) & (block.PRE_USE | temp)
-            print('B{}.LATEST = {}'.format(block.no, block.PRE_LATEST))
+            print('{}.LATEST = {}'.format(block, block.PRE_LATEST))
 
 
 ANALYSIS_USED_EXPR = 'Used-Expressions'
@@ -745,8 +745,8 @@ class UsedExpressions(FlowAnalysis):
         print('\nAfter Used Expressions:')
         name = self.name()
         for block in cfg.iterate(post_order=False):
-            print('B{}.IN  = {}'.format(block.no, block.IN[name]))
-            print('B{}.OUT = {}'.format(block.no, block.OUT[name]))
+            print('{}.IN  = {}'.format(block, block.IN[name]))
+            print('{}.OUT = {}'.format(block, block.OUT[name]))
 
 
 def eliminate_partial_redundancy(cfg, *, debug=False):
@@ -783,7 +783,7 @@ def eliminate_partial_redundancy(cfg, *, debug=False):
                     temp_var = 't{:d}'.format(temp_var_counter)
                     temp_vars[expr] = temp_var
                     temp_var_counter += 1
-                print('Prepend `{} = {}` to B{}'.format(temp_var, expr, block.no))
+                print('Prepend `{} = {}` to {}'.format(temp_var, expr, block))
 
     U = cfg.get_meta(ALL_EXPRS)
     for block in cfg.iterate(post_order=False):
@@ -793,4 +793,4 @@ def eliminate_partial_redundancy(cfg, *, debug=False):
         if exprs_to_replace:
             for expr in exprs_to_replace:
                 temp_var = temp_vars[expr]
-                print('Replace `{}` in B{} with {}'.format(expr, block.no, temp_var))
+                print('Replace `{}` in {} with {}'.format(expr, block, temp_var))
